@@ -104,11 +104,11 @@ def get_conversations_sorted() -> List[Tuple[str, Dict]]:
 
 
 def sync_selected_model_to_current() -> None:
-    """Copy the selected model into the active conversation record."""
+    """Copy the selected model into the active conversation record without updating last_modified."""
     convo = st.session_state.conversations[st.session_state.current_id]
-    convo["model"] = st.session_state.selected_model
-    convo["last_modified"] = datetime.now(timezone.utc).isoformat()
-    HISTORY.save_conversation(st.session_state.current_id, convo)
+    if convo.get("model") != st.session_state.selected_model:
+        convo["model"] = st.session_state.selected_model
+        HISTORY.save_conversation(st.session_state.current_id, convo)
 
 
 # ----------------------------------------------------------------------------
@@ -170,7 +170,6 @@ def render_chat_items() -> None:
                 if st.button("💾 Save", key=f"save_{cid}", use_container_width=True):
                     if new_title.strip():
                         st.session_state.conversations[cid]["title"] = new_title.strip()
-                        st.session_state.conversations[cid]["last_modified"] = datetime.now(timezone.utc).isoformat()
                         HISTORY.save_conversation(cid, st.session_state.conversations[cid])
                     st.session_state.renaming_chat = None
                     st.rerun()
