@@ -68,6 +68,7 @@ resource serverFarm 'Microsoft.Web/serverfarms@2022-03-01' = {
 resource appService 'Microsoft.Web/sites@2022-09-01' = {
   name: '${resourcePrefix}-app'
   location: location
+  kind: 'app,linux'
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {
@@ -78,6 +79,7 @@ resource appService 'Microsoft.Web/sites@2022-09-01' = {
     keyVaultReferenceIdentity: userAssignedIdentity.id
     serverFarmId: serverFarm.id
     siteConfig: {
+      linuxFxVersion: 'PYTHON|3.10'
       alwaysOn: true
       appSettings: [
         {
@@ -194,6 +196,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2021-11-01-preview' = {
   name: keyVaultName
   location: location
   properties: {
+    accessPolicies: []
     enabledForDeployment: false
     enabledForDiskEncryption: false
     enabledForTemplateDeployment: false
