@@ -24,6 +24,31 @@ WELCOME_SUBTITLE = "What can I do for you?"
 # State and data helpers
 # ----------------------------------------------------------------------------
 HISTORY = ChatHistoryManager(mode="local")
+
+def get_user_info() -> Dict[str, str]:
+    """Extract user information from SSO headers."""
+    try:
+        # Access the headers from the current session context
+        headers = st.context.headers
+        
+        # Extract key Azure Easy Auth headers
+        user_name = headers.get('X-MS-CLIENT-PRINCIPAL-NAME')  # Typically the user's email or display name
+        user_id = headers.get('X-MS-CLIENT-PRINCIPAL-ID')      # Unique user identifier
+        
+        return {
+            'user_id': user_id,
+            'user_name': user_name,
+            'is_authenticated': bool(user_id and user_name)
+        }
+    except Exception as e:
+        # Fallback if headers are not available or there's an error
+        return {
+            'user_id': None,
+            'user_name': None,
+            'is_authenticated': False
+        }
+
+
 def ensure_state() -> None:
     """Initialize required session_state keys and ensure a current chat exists."""
     if "conversations" not in st.session_state:
@@ -51,6 +76,10 @@ def ensure_state() -> None:
         st.session_state.renaming_chat = None
     if "selected_model" not in st.session_state:
         st.session_state.selected_model = DEFAULT_MODEL
+    
+    # Initialize user information in session state
+    if "user_info" not in st.session_state:
+        st.session_state.user_info = get_user_info()
 
 
 def new_chat() -> None:
@@ -205,20 +234,35 @@ def render_chat_items() -> None:
                     st.session_state.show_menu = None
                     st.rerun()
                 if st.button("🗑️ Delete", key=f"delete_btn_{cid}", use_container_width=True):
+                    was_current = (cid == st.session_state.current_id)
                     st.session_state.conversations.pop(cid, None)
                     HISTORY.delete_conversation(cid)
                     st.session_state.show_menu = None
                     st.session_state.renaming_chat = None
-                    if not st.session_state.conversations:
+                    if was_current:
+                        # Always create a brand-new chat when the active one is deleted
                         new_chat()
-                    else:
-                        st.session_state.current_id = next(iter(st.session_state.conversations.keys()))
+                    # If not current, keep current_id unchanged
                     st.rerun()
             st.markdown("---")
 
 
+def render_user_info() -> None:
+    """Render user information at the bottom of the sidebar."""
+    user_info = st.session_state.user_info
+    
+    if user_info['is_authenticated']:
+        display_name = user_info['user_name'] or 'Unknown User'
+        st.markdown("---")
+        st.markdown(f"**👤:&nbsp; &nbsp; {display_name}**")
+    else:
+        st.markdown("---")
+        st.markdown("**🏠 Local Mode**")
+
+
+
 def render_sidebar() -> None:
-    """Render sidebar: model picker, new chat button, and chat list."""
+    """Render sidebar: model picker, new chat button, chat list, and user info."""
     with st.sidebar:
         render_model_picker()
         if st.button("➕ New chat", use_container_width=True):
@@ -226,7 +270,13 @@ def render_sidebar() -> None:
             st.rerun()
         st.markdown("---")
         st.markdown("#### 💬 Chats")
-        render_chat_items()
+        
+        # Create scrollable container with fixed height for chat items
+        with st.container(height=450):
+            render_chat_items()
+        
+        # User info stays outside the scrollable container - always visible
+        render_user_info()
 
 
 def render_transcript(convo: Dict) -> None:

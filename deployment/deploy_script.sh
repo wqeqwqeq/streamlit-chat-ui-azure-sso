@@ -11,6 +11,7 @@ APP_NAME="${1:-stanley-test-ui-app}"
 RESOURCE_GROUP="${2:?Usage: ./deploy_script.sh <app-name> <resource-group>}"
 
 # 1) Create a minimal bundle
+cd ..
 rm -f app_bundle.zip
 zip -j -q app_bundle.zip app.py chat_history_manager.py
 [ -f requirements.txt ] && zip -j -q -u app_bundle.zip requirements.txt

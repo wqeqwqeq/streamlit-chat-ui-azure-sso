@@ -98,10 +98,10 @@ resource appService 'Microsoft.Web/sites@2022-09-01' = {
           name: 'SUBSCRIPTION_ID'
           value: subscription().subscriptionId
         }
-        {
-          name: 'WEBSITES_PORT'
-          value: '8501'
-        }
+        // {
+        //   name: 'WEBSITES_PORT'
+        //   value: '8501'
+        // }
         {
           name: 'WEBSITES_ENABLE_APP_SERVICE_STORAGE'
           value: 'false'
@@ -111,9 +111,13 @@ resource appService 'Microsoft.Web/sites@2022-09-01' = {
           value: keyVault.properties.vaultUri
         }
         {
-          name: 'SRC_PATH'
-          value: '/opt/program/'
+          name: 'SCM_DO_BUILD_DURING_DEPLOYMENT'
+          value: 'true'
         }
+        // {
+        //   name: 'SRC_PATH'
+        //   value: '/opt/program/'
+        // }
         {
           // loads private certificates to /var/ssl/private/
           name: 'WEBSITE_LOAD_CERTIFICATES'
