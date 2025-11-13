@@ -1,4 +1,4 @@
-param resourcePrefix string = 'stanley-test-ui'
+param resourcePrefix string = 'stanley-dev-ui'
 param location string = resourceGroup().location
 param skuName string = 'b1'
 param tokenProviderAppId string = '9ec6a2d4-9b95-4f01-b5d0-07eb4da70508'

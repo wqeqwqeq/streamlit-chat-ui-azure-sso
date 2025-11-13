@@ -5,9 +5,9 @@ set -euo pipefail
 
 # Simple ZIP deploy for Azure Web App
 # Usage: ./deploy_script.sh [APP_NAME] [RESOURCE_GROUP]
-# Defaults to APP_NAME=stanley-test-ui-app; RESOURCE_GROUP is required if not set via az default.
+# Defaults to APP_NAME=stanley-dev-ui-app; RESOURCE_GROUP is required if not set via az default.
 
-APP_NAME="${1:-stanley-test-ui-app}"
+APP_NAME="${1:-stanley-dev-ui-app}"
 RESOURCE_GROUP="${2:?Usage: ./deploy_script.sh <app-name> <resource-group>}"
 
 # 1) Create a minimal bundle
@@ -15,8 +15,6 @@ cd ..
 rm -f app_bundle.zip
 zip -j -q app_bundle.zip app.py chat_history_manager.py
 [ -f requirements.txt ] && zip -j -q -u app_bundle.zip requirements.txt
-[ -f pyproject.toml ] && zip -j -q -u app_bundle.zip pyproject.toml
-[ -f uv.lock ] && zip -j -q -u app_bundle.zip uv.lock
 
 # 2) Ensure build on deploy and a Streamlit startup command
 az webapp config appsettings set -g "$RESOURCE_GROUP" -n "$APP_NAME" --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true >/dev/null

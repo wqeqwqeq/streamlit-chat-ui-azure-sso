@@ -36,7 +36,7 @@ Deploy to Azure Web App (Linux with Python 3.10):
 ```bash
 cd deployment
 ./deploy_script.sh <app-name> <resource-group>
-# Default app-name: stanley-test-ui-app
+# Default app-name: stanley-dev-ui-app
 ```
 
 The deployment script creates a ZIP bundle with app.py, chat_history_manager.py, requirements.txt, pyproject.toml, and uv.lock.
@@ -150,7 +150,7 @@ The deploy script sets these critical Azure Web App settings:
 ### Bicep Parameters
 
 Key parameters in `simplified.bicep`:
-- `resourcePrefix`: Prefix for all resource names (default: 'stanley-test-ui')
+- `resourcePrefix`: Prefix for all resource names (default: 'stanley-dev-ui')
 - `skuName`: App Service Plan SKU (default: 'b1')
 - `tokenProviderAppId`: Azure AD App Registration client ID for Easy Auth
 - `location`: Defaults to resource group location
