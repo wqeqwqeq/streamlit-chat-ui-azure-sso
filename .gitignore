@@ -9,3 +9,13 @@ wheels/
 # Virtual environments
 .venv
 .chat_history/
+
+# Environment variables (contains secrets!)
+.env
+
+# Generated files (auto-generated from pyproject.toml)
+requirements.txt
+
+# Deployment artifacts
+app_bundle.zip
+app_bundle/

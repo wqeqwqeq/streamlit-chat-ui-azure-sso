@@ -1,9 +1,11 @@
 [project]
 name = "streamlit-ui"
 version = "0.1.0"
-description = "Add your description here"
+description = "DAPE OpsAgent Manager - Streamlit Chat UI"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "streamlit>=1.50.0",
+    "streamlit>=1.36.0",
+    "psycopg2-binary==2.9.9",
+    "python-dotenv==1.0.0",
 ]

@@ -3,11 +3,21 @@ param location string = resourceGroup().location
 param skuName string = 'b1'
 param tokenProviderAppId string = '9ec6a2d4-9b95-4f01-b5d0-07eb4da70508'
 
+@secure()
+@description('PostgreSQL administrator login password')
+param postgresAdminPassword string
+
+param postgresAdminLogin string = 'pgadmin'
+param postgresSku string = 'Standard_B1ms'
+param postgresStorageSizeGB int = 32
+param postgresDatabaseName string = 'chat_history'
+
 // ======================== Internal ========================
 
 var resourcePrefixShort = replace(resourcePrefix, '-', '')
 var keyVaultName = '${resourcePrefixShort}kv'
 var isSbx = contains(resourcePrefix, 'sbx')
+var postgresServerName = '${resourcePrefix}-postgres'
 
 
 
@@ -79,7 +89,7 @@ resource appService 'Microsoft.Web/sites@2022-09-01' = {
     keyVaultReferenceIdentity: userAssignedIdentity.id
     serverFarmId: serverFarm.id
     siteConfig: {
-      linuxFxVersion: 'PYTHON|3.10'
+      linuxFxVersion: 'PYTHON|3.12'
       alwaysOn: true
       appSettings: [
         {
@@ -216,4 +226,81 @@ resource keyVault 'Microsoft.KeyVault/vaults@2021-11-01-preview' = {
     }
     tenantId: subscription().tenantId
   }
+}
+
+// Grant Key Vault access to App Service managed identity
+resource keyVaultAccessPolicy 'Microsoft.KeyVault/vaults/accessPolicies@2021-11-01-preview' = {
+  name: 'add'
+  parent: keyVault
+  properties: {
+    accessPolicies: [
+      {
+        tenantId: subscription().tenantId
+        objectId: userAssignedIdentity.properties.principalId
+        permissions: {
+          secrets: [
+            'get'
+            'list'
+          ]
+        }
+      }
+    ]
+  }
+}
+
+// ======================== PostgreSQL Flexible Server ========================
+resource postgresServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-03-01-preview' = {
+  name: postgresServerName
+  location: location
+  sku: {
+    name: postgresSku
+    tier: 'Burstable'
+  }
+  properties: {
+    administratorLogin: postgresAdminLogin
+    administratorLoginPassword: postgresAdminPassword
+    version: '15'
+    storage: {
+      storageSizeGB: postgresStorageSizeGB
+    }
+    backup: {
+      backupRetentionDays: 7
+      geoRedundantBackup: 'Disabled'
+    }
+    highAvailability: {
+      mode: 'Disabled'
+    }
+  }
+}
+
+// PostgreSQL database
+resource postgresDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2023-03-01-preview' = {
+  name: postgresDatabaseName
+  parent: postgresServer
+  properties: {
+    charset: 'UTF8'
+    collation: 'en_US.utf8'
+  }
+}
+
+// Firewall rule to allow Azure services
+resource postgresFirewallRule 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2023-03-01-preview' = {
+  name: 'AllowAzureServices'
+  parent: postgresServer
+  properties: {
+    startIpAddress: '0.0.0.0'
+    endIpAddress: '0.0.0.0'
+  }
+}
+
+// Store PostgreSQL connection string in Key Vault
+resource postgresConnectionStringSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = {
+  name: 'postgres-connection-string'
+  parent: keyVault
+  properties: {
+    value: 'postgresql://${postgresAdminLogin}:${postgresAdminPassword}@${postgresServer.properties.fullyQualifiedDomainName}:5432/${postgresDatabaseName}?sslmode=require'
+  }
+  dependsOn: [
+    keyVaultAccessPolicy
+  ]
 }

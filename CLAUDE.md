@@ -18,20 +18,24 @@ The app runs on `http://localhost:8501` by default.
 
 ### Environment Setup
 
-```bash
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
+This project uses `pyproject.toml` for dependency management. The `requirements.txt` file is auto-generated during deployment.
 
-Or using uv (project uses uv.lock):
+Using uv (recommended):
 ```bash
 uv sync
 ```
 
+Or using pip:
+```bash
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+uv pip compile pyproject.toml -o requirements.txt
+pip install -r requirements.txt
+```
+
 ### Deployment to Azure
 
-Deploy to Azure Web App (Linux with Python 3.10):
+Deploy to Azure Web App (Linux with Python 3.12):
 
 ```bash
 cd deployment
@@ -39,7 +43,7 @@ cd deployment
 # Default app-name: stanley-dev-ui-app
 ```
 
-The deployment script creates a ZIP bundle with app.py, chat_history_manager.py, requirements.txt, pyproject.toml, and uv.lock.
+The deployment script automatically generates `requirements.txt` from `pyproject.toml` using `uv pip compile`, then creates a ZIP bundle with app.py, chat_history_manager.py, and requirements.txt.
 
 ### Infrastructure Deployment
 
@@ -112,7 +116,7 @@ Available models configured in `models_list()` (app.py:105):
 
 The Bicep template (`deployment/simplified.bicep`) provisions:
 - App Service Plan (Linux, configurable SKU, default B1)
-- App Service (Python 3.10 runtime)
+- App Service (Python 3.12 runtime)
 - User-assigned Managed Identity
 - Application Insights + Log Analytics Workspace
 - Key Vault

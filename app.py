@@ -2,13 +2,18 @@
 app.py
 Streamlit chat UI refactored for clarity and functional structure.
 """
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple
 
 import streamlit as st
+from dotenv import load_dotenv
+
 from chat_history_manager import ChatHistoryManager
 
+# Load environment variables from .env file
+load_dotenv()
 
 # ----------------------------------------------------------------------------
 # Configuration and constants
@@ -23,39 +28,84 @@ WELCOME_SUBTITLE = "What can I do for you?"
 # ----------------------------------------------------------------------------
 # State and data helpers
 # ----------------------------------------------------------------------------
-HISTORY = ChatHistoryManager(mode="local")
+# Initialize chat history manager based on environment configuration
+CHAT_HISTORY_MODE = os.getenv("CHAT_HISTORY_MODE", "local")
+CONVERSATION_HISTORY_DAYS = int(os.getenv("CONVERSATION_HISTORY_DAYS", "7"))
+
+if CHAT_HISTORY_MODE == "postgres" or CHAT_HISTORY_MODE == "local_psql":
+    # Build PostgreSQL connection string from environment variables
+    host = os.getenv("POSTGRES_HOST", "localhost")
+    port = os.getenv("POSTGRES_PORT", "5432")
+    user = os.getenv("POSTGRES_ADMIN_LOGIN", "pgadmin")
+    password = os.getenv("POSTGRES_ADMIN_PASSWORD", "")
+    database = os.getenv("POSTGRES_DATABASE", "chat_history")
+    sslmode = os.getenv("POSTGRES_SSLMODE", "require")
+    connection_string = f"postgresql://{user}:{password}@{host}:{port}/{database}?sslmode={sslmode}"
+
+    HISTORY = ChatHistoryManager(
+        mode="postgres",
+        connection_string=connection_string,
+        history_days=CONVERSATION_HISTORY_DAYS
+    )
+else:
+    HISTORY = ChatHistoryManager(mode="local")
 
 def get_user_info() -> Dict[str, str]:
-    """Extract user information from SSO headers."""
-    try:
-        # Access the headers from the current session context
-        headers = st.context.headers
-        
-        # Extract key Azure Easy Auth headers
-        user_name = headers.get('X-MS-CLIENT-PRINCIPAL-NAME')  # Typically the user's email or display name
-        user_id = headers.get('X-MS-CLIENT-PRINCIPAL-ID')      # Unique user identifier
-        
+    """Extract user information from SSO headers or environment config.
+
+    Supports three modes:
+    1. local_psql: Use hardcoded test credentials from environment
+    2. postgres: Use real SSO headers from Azure Easy Auth
+    3. local: Fallback for local JSON mode
+    """
+    # Check if we're in local PostgreSQL testing mode
+    if CHAT_HISTORY_MODE == "local_psql":
         return {
-            'user_id': user_id,
-            'user_name': user_name,
-            'is_authenticated': bool(user_id and user_name)
+            'user_id': os.getenv('LOCAL_TEST_CLIENT_ID', '00000000-0000-0000-0000-000000000001'),
+            'user_name': os.getenv('LOCAL_TEST_USERNAME', 'local_user'),
+            'is_authenticated': True,
+            'mode': 'local_psql'
         }
-    except Exception as e:
-        # Fallback if headers are not available or there's an error
-        return {
-            'user_id': None,
-            'user_name': None,
-            'is_authenticated': False
-        }
+
+    # Try to extract from SSO headers (postgres mode)
+    if CHAT_HISTORY_MODE == "postgres":
+        try:
+            headers = st.context.headers
+            user_name = headers.get('X-MS-CLIENT-PRINCIPAL-NAME')
+            user_id = headers.get('X-MS-CLIENT-PRINCIPAL-ID')
+
+            if user_id and user_name:
+                return {
+                    'user_id': user_id,
+                    'user_name': user_name,
+                    'is_authenticated': True,
+                    'mode': 'postgres'
+                }
+        except Exception:
+            pass
+
+    # Fallback for local mode or when SSO headers are unavailable
+    return {
+        'user_id': 'local_user',
+        'user_name': 'Local User',
+        'is_authenticated': False,
+        'mode': 'local'
+    }
 
 
 def ensure_state() -> None:
     """Initialize required session_state keys and ensure a current chat exists."""
+    # Initialize user information first (needed for PostgreSQL mode)
+    if "user_info" not in st.session_state:
+        st.session_state.user_info = get_user_info()
+
     if "conversations" not in st.session_state:
         st.session_state.conversations = {}
-        # Load from persistent storage (local JSON files)
-        for cid, convo in HISTORY.list_conversations():
+        # Load from persistent storage
+        user_id = st.session_state.user_info.get('user_id')
+        for cid, convo in HISTORY.list_conversations(user_id=user_id):
             st.session_state.conversations[cid] = convo
+
     if "current_id" not in st.session_state or st.session_state.current_id not in st.session_state.conversations:
         # Prefer reusing an existing clean chat (no messages) to avoid duplicates
         empty_chats = [
@@ -70,16 +120,13 @@ def ensure_state() -> None:
         else:
             # No clean chat available; create a fresh one to show welcome page
             new_chat()
+
     if "show_menu" not in st.session_state:
         st.session_state.show_menu = None
     if "renaming_chat" not in st.session_state:
         st.session_state.renaming_chat = None
     if "selected_model" not in st.session_state:
         st.session_state.selected_model = DEFAULT_MODEL
-    
-    # Initialize user information in session state
-    if "user_info" not in st.session_state:
-        st.session_state.user_info = get_user_info()
 
 
 def new_chat() -> None:
@@ -93,7 +140,8 @@ def new_chat() -> None:
         "last_modified": datetime.now(timezone.utc).isoformat(),
     }
     st.session_state.current_id = cid
-    HISTORY.save_conversation(cid, st.session_state.conversations[cid])
+    user_id = st.session_state.user_info.get('user_id')
+    HISTORY.save_conversation(cid, st.session_state.conversations[cid], user_id=user_id)
 
 
 def title_from_first_user_message(msg: str) -> str:
@@ -137,7 +185,8 @@ def sync_selected_model_to_current() -> None:
     convo = st.session_state.conversations[st.session_state.current_id]
     if convo.get("model") != st.session_state.selected_model:
         convo["model"] = st.session_state.selected_model
-        HISTORY.save_conversation(st.session_state.current_id, convo)
+        user_id = st.session_state.user_info.get('user_id')
+        HISTORY.save_conversation(st.session_state.current_id, convo, user_id=user_id)
 
 
 # ----------------------------------------------------------------------------
@@ -199,7 +248,8 @@ def render_chat_items() -> None:
                 if st.button("💾 Save", key=f"save_{cid}", use_container_width=True):
                     if new_title.strip():
                         st.session_state.conversations[cid]["title"] = new_title.strip()
-                        HISTORY.save_conversation(cid, st.session_state.conversations[cid])
+                        user_id = st.session_state.user_info.get('user_id')
+                        HISTORY.save_conversation(cid, st.session_state.conversations[cid], user_id=user_id)
                     st.session_state.renaming_chat = None
                     st.rerun()
             with col_cancel:
@@ -218,6 +268,13 @@ def render_chat_items() -> None:
                 use_container_width=True,
                 type="primary" if is_selected else "secondary",
             ):
+                # If using PostgreSQL and messages aren't loaded, fetch them now
+                if (CHAT_HISTORY_MODE == "postgres" or CHAT_HISTORY_MODE == "local_psql") and not convo.get("messages"):
+                    user_id = st.session_state.user_info.get('user_id')
+                    full_convo = HISTORY.get_conversation(cid, user_id=user_id)
+                    if full_convo:
+                        st.session_state.conversations[cid] = full_convo
+
                 st.session_state.current_id = cid
                 st.session_state.show_menu = None
                 st.rerun()
@@ -236,7 +293,8 @@ def render_chat_items() -> None:
                 if st.button("🗑️ Delete", key=f"delete_btn_{cid}", use_container_width=True):
                     was_current = (cid == st.session_state.current_id)
                     st.session_state.conversations.pop(cid, None)
-                    HISTORY.delete_conversation(cid)
+                    user_id = st.session_state.user_info.get('user_id')
+                    HISTORY.delete_conversation(cid, user_id=user_id)
                     st.session_state.show_menu = None
                     st.session_state.renaming_chat = None
                     if was_current:
@@ -250,13 +308,18 @@ def render_chat_items() -> None:
 def render_user_info() -> None:
     """Render user information at the bottom of the sidebar."""
     user_info = st.session_state.user_info
-    
-    if user_info['is_authenticated']:
+    mode = user_info.get('mode', 'local')
+
+    st.markdown("---")
+
+    if mode == 'local_psql':
         display_name = user_info['user_name'] or 'Unknown User'
-        st.markdown("---")
-        st.markdown(f"**👤:&nbsp; &nbsp; {display_name}**")
+        st.markdown(f"**🧪 Local PostgreSQL Mode**")
+        st.markdown(f"*Test User: {display_name}*")
+    elif mode == 'postgres' and user_info['is_authenticated']:
+        display_name = user_info['user_name'] or 'Unknown User'
+        st.markdown(f"**👤 {display_name}**")
     else:
-        st.markdown("---")
         st.markdown("**🏠 Local Mode**")
 
 
@@ -321,7 +384,8 @@ def handle_chat_input(convo: Dict) -> None:
     with st.chat_message("assistant"):
         st.markdown(reply)
     # Persist conversation after message exchange
-    HISTORY.save_conversation(st.session_state.current_id, convo)
+    user_id = st.session_state.user_info.get('user_id')
+    HISTORY.save_conversation(st.session_state.current_id, convo, user_id=user_id)
     st.rerun()
 
 
