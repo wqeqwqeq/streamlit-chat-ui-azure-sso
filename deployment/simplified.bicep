@@ -16,7 +16,6 @@ param postgresDatabaseName string = 'chat_history'
 
 var resourcePrefixShort = replace(resourcePrefix, '-', '')
 var keyVaultName = '${resourcePrefixShort}kv'
-var isSbx = contains(resourcePrefix, 'sbx')
 var postgresServerName = '${resourcePrefix}-postgres'
 
 
@@ -145,17 +144,17 @@ resource appConfig 'Microsoft.Web/sites/config@2022-09-01' = {
   parent: appService
   properties: {
     platform: {
-      enabled: !isSbx
+      enabled: true
       runtimeVersion: '~1'
     }
     globalValidation: {
-      requireAuthentication: !isSbx
+      requireAuthentication: true
       unauthenticatedClientAction: 'RedirectToLoginPage'
       redirectToProvider: 'azureactivedirectory'
     }
     identityProviders: {
       azureActiveDirectory: {
-        enabled: !isSbx
+        enabled: true
         registration: {
           openIdIssuer: 'https://sts.windows.net/${subscription().tenantId}/v2.0'
           clientId: tokenProviderAppId
@@ -178,7 +177,7 @@ resource appConfig 'Microsoft.Web/sites/config@2022-09-01' = {
     login: {
       routes: {}
       tokenStore: {
-        enabled: !isSbx
+        enabled: true
         tokenRefreshExtensionHours: json('72.0')
         fileSystem: {}
         azureBlobStorage: {}
@@ -289,7 +288,7 @@ resource postgresFirewallRule 'Microsoft.DBforPostgreSQL/flexibleServers/firewal
   parent: postgresServer
   properties: {
     startIpAddress: '0.0.0.0'
-    endIpAddress: '0.0.0.0'
+    endIpAddress: '255.255.255.255'
   }
 }
 
