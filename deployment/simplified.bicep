@@ -12,6 +12,13 @@ param postgresSku string = 'Standard_B1ms'
 param postgresStorageSizeGB int = 32
 param postgresDatabaseName string = 'chat_history'
 
+@description('Redis Cache SKU name')
+@allowed(['Basic', 'Standard', 'Premium'])
+param redisSkuName string = 'Basic'
+
+@description('Redis Cache capacity (0=250MB, 1=1GB, 2=2.5GB)')
+param redisSkuCapacity int = 0
+
 // ======================== Internal ========================
 
 var resourcePrefixShort = replace(resourcePrefix, '-', '')
@@ -303,3 +310,27 @@ resource postgresConnectionStringSecret 'Microsoft.KeyVault/vaults/secrets@2023-
     keyVaultAccessPolicy
   ]
 }
+
+// ======================== Azure Redis Cache ========================
+resource redisCache 'Microsoft.Cache/redis@2023-08-01' = {
+  name: '${resourcePrefix}-redis'
+  location: location
+  properties: {
+    sku: {
+      name: redisSkuName
+      family: 'C'
+      capacity: redisSkuCapacity
+    }
+    enableNonSslPort: false
+    minimumTlsVersion: '1.2'
+    publicNetworkAccess: 'Enabled'
+    redisConfiguration: {
+      'maxmemory-policy': 'allkeys-lru'  // Evict least recently used
+    }
+  }
+}
+
+// ======================== Outputs ========================
+output redisHostName string = redisCache.properties.hostName
+output redisSslPort int = redisCache.properties.sslPort
+output postgresHostName string = postgresServer.properties.fullyQualifiedDomainName

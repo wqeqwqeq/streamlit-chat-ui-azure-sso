@@ -61,6 +61,8 @@ python-dotenv==1.0.0
     # via streamlit-ui (pyproject.toml)
 pytz==2025.2
     # via pandas
+redis==7.0.1
+    # via streamlit-ui (pyproject.toml)
 referencing==0.37.0
     # via
     #   jsonschema

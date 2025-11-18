@@ -32,7 +32,34 @@ WELCOME_SUBTITLE = "What can I do for you?"
 CHAT_HISTORY_MODE = os.getenv("CHAT_HISTORY_MODE", "local")
 CONVERSATION_HISTORY_DAYS = int(os.getenv("CONVERSATION_HISTORY_DAYS", "7"))
 
-if CHAT_HISTORY_MODE == "postgres" or CHAT_HISTORY_MODE == "local_psql":
+if CHAT_HISTORY_MODE in ["redis", "local_redis"]:
+    # Build PostgreSQL connection string from environment variables
+    host = os.getenv("POSTGRES_HOST", "localhost")
+    port = os.getenv("POSTGRES_PORT", "5432")
+    user = os.getenv("POSTGRES_ADMIN_LOGIN", "pgadmin")
+    password = os.getenv("POSTGRES_ADMIN_PASSWORD", "")
+    database = os.getenv("POSTGRES_DATABASE", "chat_history")
+    sslmode = os.getenv("POSTGRES_SSLMODE", "require")
+    connection_string = f"postgresql://{user}:{password}@{host}:{port}/{database}?sslmode={sslmode}"
+
+    # Build Redis connection parameters
+    redis_host = os.getenv("REDIS_HOST", "localhost")
+    redis_password = os.getenv("REDIS_PASSWORD", "")
+    redis_port = int(os.getenv("REDIS_PORT", "6380"))
+    redis_ssl = os.getenv("REDIS_SSL", "true").lower() == "true"
+    redis_ttl = int(os.getenv("REDIS_TTL_SECONDS", "1800"))
+
+    HISTORY = ChatHistoryManager(
+        mode="redis",
+        connection_string=connection_string,
+        redis_host=redis_host,
+        redis_password=redis_password,
+        redis_port=redis_port,
+        redis_ssl=redis_ssl,
+        redis_ttl=redis_ttl,
+        history_days=CONVERSATION_HISTORY_DAYS
+    )
+elif CHAT_HISTORY_MODE == "postgres" or CHAT_HISTORY_MODE == "local_psql":
     # Build PostgreSQL connection string from environment variables
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5432")
@@ -53,22 +80,24 @@ else:
 def get_user_info() -> Dict[str, str]:
     """Extract user information from SSO headers or environment config.
 
-    Supports three modes:
-    1. local_psql: Use hardcoded test credentials from environment
-    2. postgres: Use real SSO headers from Azure Easy Auth
-    3. local: Fallback for local JSON mode
+    Supports five modes:
+    1. local_psql: Use hardcoded test credentials from environment (PostgreSQL only)
+    2. local_redis: Use hardcoded test credentials from environment (Redis + PostgreSQL)
+    3. postgres: Use real SSO headers from Azure Easy Auth (PostgreSQL only)
+    4. redis: Use real SSO headers from Azure Easy Auth (Redis + PostgreSQL)
+    5. local: Fallback for local JSON mode
     """
-    # Check if we're in local PostgreSQL testing mode
-    if CHAT_HISTORY_MODE == "local_psql":
+    # Check if we're in local testing mode (PostgreSQL or Redis)
+    if CHAT_HISTORY_MODE in ["local_psql", "local_redis"]:
         return {
             'user_id': os.getenv('LOCAL_TEST_CLIENT_ID', '00000000-0000-0000-0000-000000000001'),
             'user_name': os.getenv('LOCAL_TEST_USERNAME', 'local_user'),
             'is_authenticated': True,
-            'mode': 'local_psql'
+            'mode': CHAT_HISTORY_MODE
         }
 
-    # Try to extract from SSO headers (postgres mode)
-    if CHAT_HISTORY_MODE == "postgres":
+    # Try to extract from SSO headers (postgres or redis mode)
+    if CHAT_HISTORY_MODE in ["postgres", "redis"]:
         try:
             headers = st.context.headers
             user_name = headers.get('X-MS-CLIENT-PRINCIPAL-NAME')
@@ -79,7 +108,7 @@ def get_user_info() -> Dict[str, str]:
                     'user_id': user_id,
                     'user_name': user_name,
                     'is_authenticated': True,
-                    'mode': 'postgres'
+                    'mode': CHAT_HISTORY_MODE
                 }
         except Exception:
             pass
@@ -268,8 +297,8 @@ def render_chat_items() -> None:
                 use_container_width=True,
                 type="primary" if is_selected else "secondary",
             ):
-                # If using PostgreSQL and messages aren't loaded, fetch them now
-                if (CHAT_HISTORY_MODE == "postgres" or CHAT_HISTORY_MODE == "local_psql") and not convo.get("messages"):
+                # If using PostgreSQL/Redis and messages aren't loaded, fetch them now
+                if CHAT_HISTORY_MODE in ["postgres", "local_psql", "redis", "local_redis"] and not convo.get("messages"):
                     user_id = st.session_state.user_info.get('user_id')
                     full_convo = HISTORY.get_conversation(cid, user_id=user_id)
                     if full_convo:
@@ -316,7 +345,14 @@ def render_user_info() -> None:
         display_name = user_info['user_name'] or 'Unknown User'
         st.markdown(f"**🧪 Local PostgreSQL Mode**")
         st.markdown(f"*Test User: {display_name}*")
+    elif mode == 'local_redis':
+        display_name = user_info['user_name'] or 'Unknown User'
+        st.markdown(f"**🧪 Local Redis Mode**")
+        st.markdown(f"*Test User: {display_name}*")
     elif mode == 'postgres' and user_info['is_authenticated']:
+        display_name = user_info['user_name'] or 'Unknown User'
+        st.markdown(f"**👤 {display_name}**")
+    elif mode == 'redis' and user_info['is_authenticated']:
         display_name = user_info['user_name'] or 'Unknown User'
         st.markdown(f"**👤 {display_name}**")
     else:
