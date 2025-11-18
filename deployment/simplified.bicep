@@ -33,6 +33,29 @@ resource userAssignedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@
   location: location
 }
 
+// Azure Container Registry for storing Docker images
+resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-01-01-preview' = {
+  name: '${resourcePrefixShort}acr'  // e.g., stanleydevuiacr (no hyphens)
+  location: location
+  sku: {
+    name: 'Basic'
+  }
+  properties: {
+    adminUserEnabled: true  // Enable admin credentials for Docker image pulls
+  }
+}
+
+// NOTE: RBAC role assignment removed - using admin credentials instead of managed identity
+// resource acrPullRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+//   name: guid(containerRegistry.id, userAssignedIdentity.id, 'acrpull')
+//   scope: containerRegistry
+//   properties: {
+//     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')  // AcrPull role
+//     principalId: userAssignedIdentity.properties.principalId
+//     principalType: 'ServicePrincipal'
+//   }
+// }
+
 // get reference to existing central Log Analytics workspace
 resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2021-06-01' = {
   name: 'test-log-ws'
@@ -94,9 +117,13 @@ resource appService 'Microsoft.Web/sites@2022-09-01' = {
   properties: {
     keyVaultReferenceIdentity: userAssignedIdentity.id
     serverFarmId: serverFarm.id
+
+
     siteConfig: {
-      linuxFxVersion: 'PYTHON|3.12'
+      // CHANGE: Use Docker container instead of Python runtime
+      linuxFxVersion: 'DOCKER|${containerRegistry.properties.loginServer}/${resourcePrefix}-app:latest'
       alwaysOn: true
+
       appSettings: [
         {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
@@ -114,10 +141,6 @@ resource appService 'Microsoft.Web/sites@2022-09-01' = {
           name: 'SUBSCRIPTION_ID'
           value: subscription().subscriptionId
         }
-        // {
-        //   name: 'WEBSITES_PORT'
-        //   value: '8501'
-        // }
         {
           name: 'WEBSITES_ENABLE_APP_SERVICE_STORAGE'
           value: 'false'
@@ -127,23 +150,33 @@ resource appService 'Microsoft.Web/sites@2022-09-01' = {
           value: keyVault.properties.vaultUri
         }
         {
-          name: 'SCM_DO_BUILD_DURING_DEPLOYMENT'
-          value: 'true'
-        }
-        // {
-        //   name: 'SRC_PATH'
-        //   value: '/opt/program/'
-        // }
-        {
           // loads private certificates to /var/ssl/private/
           name: 'WEBSITE_LOAD_CERTIFICATES'
           value: '*'
         }
+        // ACR configuration - using admin credentials
+        {
+          name: 'DOCKER_REGISTRY_SERVER_URL'
+          value: 'https://${containerRegistry.properties.loginServer}'
+        }
+        {
+          name: 'DOCKER_REGISTRY_SERVER_USERNAME'
+          value: containerRegistry.listCredentials().username
+        }
+        {
+          name: 'DOCKER_REGISTRY_SERVER_PASSWORD'
+          value: containerRegistry.listCredentials().passwords[0].value
+        }
+        // Critical: Tell Azure the container listens on port 8000
+        {
+          name: 'WEBSITES_PORT'
+          value: '8000'
+        }
       ]
       ipSecurityRestrictionsDefaultAction: 'Allow'
-      // ipSecurityRestrictions: isSbx ? loadJsonContent('zscalerIPs.json') : []
     }
   }
+  // No longer need to wait for RBAC role assignment - using admin credentials
 }
 
 resource appConfig 'Microsoft.Web/sites/config@2022-09-01' = {
@@ -334,3 +367,5 @@ resource redisCache 'Microsoft.Cache/redis@2023-08-01' = {
 output redisHostName string = redisCache.properties.hostName
 output redisSslPort int = redisCache.properties.sslPort
 output postgresHostName string = postgresServer.properties.fullyQualifiedDomainName
+output acrLoginServer string = containerRegistry.properties.loginServer
+output acrName string = containerRegistry.name

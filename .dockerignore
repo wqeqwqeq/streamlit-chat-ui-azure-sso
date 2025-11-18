@@ -1,0 +1,22 @@
+# Virtual environments
+.venv/
+__pycache__/
+*.pyc
+
+# Local data
+.chat_history/
+
+# Git
+.git/
+.gitignore
+
+# Deployment artifacts
+deployment/
+app_bundle.zip
+
+# OS files
+.DS_Store
+
+# Documentation (optional - keep CLAUDE.md if needed)
+README.md
+*.md

@@ -176,59 +176,53 @@ deploy_database() {
 # ================================================================
 # Function: deploy_app
 # ================================================================
-# Deploys the Streamlit application by:
-# 1. Generating requirements.txt from pyproject.toml
-# 2. Creating ZIP bundle with app files
-# 3. Configuring Azure Web App startup command
-# 4. Uploading and deploying to Azure
+# Deploys the containerized Streamlit application by:
+# 1. Updating App Service container configuration
+# 2. Restarting the app to pull new image
 # ================================================================
 deploy_app() {
     echo ""
     echo "================================================================"
-    echo "Deploy Application"
+    echo "Deploy Application Container"
     echo "================================================================"
     echo ""
 
-    # Create deployment bundle
-    echo "📦 Creating deployment bundle..."
-    cd "$SCRIPT_DIR/.."
-    rm -f app_bundle.zip
+    # Get ACR name (remove hyphens from resource prefix)
+    ACR_NAME=$(echo "${RESOURCE_PREFIX}" | tr -d '-')"acr"
+    IMAGE_NAME="${RESOURCE_PREFIX}-app"
+    TAG="${2:-latest}"  # Optional tag parameter (default: latest)
 
-    # Generate requirements.txt from pyproject.toml using uv
-    echo "   📋 Generating requirements.txt from pyproject.toml..."
-    uv pip compile pyproject.toml -o requirements.txt --quiet
-    echo "   ✓ Generated requirements.txt"
-
-    # Create ZIP bundle with core files
-    zip -j -q app_bundle.zip app.py chat_history_manager.py requirements.txt .env
-    echo "   ✓ Added app.py, chat_history_manager.py, requirements.txt, .env"
-
-    BUNDLE_SIZE=$(du -h app_bundle.zip | cut -f1)
-    echo "   ✓ Bundle created: app_bundle.zip ($BUNDLE_SIZE)"
-
-    # Configure startup command
+    echo "📋 Container configuration:"
+    echo "   ACR:       ${ACR_NAME}.azurecr.io"
+    echo "   Image:     ${IMAGE_NAME}:${TAG}"
+    echo "   Full path: ${ACR_NAME}.azurecr.io/${IMAGE_NAME}:${TAG}"
     echo ""
-    echo "⚙️  Configuring app settings..."
-    az webapp config set \
+
+    # Update app service to use new container image
+    echo "🔄 Updating container configuration..."
+    az webapp config container set \
       -g "$AZURE_RESOURCE_GROUP" \
       -n "$APP_NAME" \
-      --startup-file "python -m streamlit run app.py --server.port 8000 --server.address 0.0.0.0" \
+      --docker-custom-image-name "${ACR_NAME}.azurecr.io/${IMAGE_NAME}:${TAG}" \
+      --docker-registry-server-url "https://${ACR_NAME}.azurecr.io" \
       --output none
-    echo "   ✓ Startup command configured"
-
-    # Deploy via ZIP
-    echo ""
-    echo "🚀 Uploading application to Azure..."
-    az webapp deployment source config-zip \
-      -g "$AZURE_RESOURCE_GROUP" \
-      -n "$APP_NAME" \
-      --src app_bundle.zip \
-      --timeout 1200
 
     if [ $? -eq 0 ]; then
-        echo "   ✓ Application deployed successfully"
+        echo "   ✓ Container configuration updated"
     else
-        echo "   ❌ Deployment failed"
+        echo "   ❌ Failed to update container configuration"
+        exit 1
+    fi
+
+    # Restart app to pull new image
+    echo ""
+    echo "🔄 Restarting app service to pull new container..."
+    az webapp restart -g "$AZURE_RESOURCE_GROUP" -n "$APP_NAME"
+
+    if [ $? -eq 0 ]; then
+        echo "   ✓ App service restarted"
+    else
+        echo "   ❌ Failed to restart app service"
         exit 1
     fi
 
