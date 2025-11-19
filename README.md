@@ -11,6 +11,8 @@ A Streamlit-based chat UI (ChatGPT-like interface) with persistent chat history,
 - **Write-through Redis caching** for improved performance (all writes go to both cache and database)
 - **Flexible storage modes** configured via `CHAT_HISTORY_MODE` in `.env` (local, postgres, redis)
 - Container-based deployment to Azure App Service
+- **VNet Integration with NAT Gateway** for network isolation and static outbound IP
+- **Network-isolated PostgreSQL** with IP whitelisting (only App Service can connect)
 - Secure infrastructure with Managed Identity and Key Vault
 
 ## Table of Contents
@@ -62,6 +64,10 @@ AZURE_SUBSCRIPTION_ID=your-subscription-id
 AZURE_RESOURCE_GROUP=your-resource-group-name
 AZURE_LOCATION=eastus
 RESOURCE_PREFIX=stanley-dev-ui
+
+# Virtual Network Configuration
+VNET_ADDRESS_SPACE=10.0.0.0/16
+SUBNET_ADDRESS_PREFIX=10.0.1.0/26
 
 # PostgreSQL Configuration
 POSTGRES_ADMIN_LOGIN=pgadmin
@@ -150,8 +156,10 @@ This creates the Azure resource group in your specified location.
 
 This provisions all Azure resources using Bicep:
 - App Service Plan (Linux)
-- App Service (Python 3.12 runtime)
-- PostgreSQL Flexible Server
+- App Service (Python 3.12 runtime) with VNet integration
+- Virtual Network with delegated subnet for App Service
+- NAT Gateway with static public IP for outbound traffic
+- PostgreSQL Flexible Server (network-isolated, NAT Gateway IP whitelisted)
 - Redis Cache
 - Azure Container Registry (ACR)
 - Key Vault
@@ -295,34 +303,53 @@ Initializes database and deploys the application.
 ### Application Components
 
 ```
-┌─────────────────────────────────────────────────┐
-│          Azure App Service (Linux)              │
-│  ┌───────────────────────────────────────────┐  │
-│  │   Streamlit Container (Python 3.12)       │  │
-│  │                                           │  │
-│  │   - app.py (main UI)                     │  │
-│  │   - chat_history_manager.py (storage)    │  │
-│  │   - Azure Easy Auth (SSO headers)        │  │
-│  └───────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────┘
-         │                    │
-         │                    │
-         ▼                    ▼
-┌──────────────────┐  ┌──────────────────┐
-│  PostgreSQL      │  │  Redis Cache     │
-│  Flexible Server │  │  (Premium)       │
-│                  │  │                  │
-│  - Conversations │  │  - WRITE-THROUGH │
-│  - Messages      │  │  - 30min TTL     │
-│  - PRIMARY STORE │  │  - Cache Layer   │
-└──────────────────┘  └──────────────────┘
-      (writes go to both simultaneously)
+┌────────────────────────────────────────────────────────────┐
+│              Virtual Network (10.0.0.0/16)                 │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │        App Service Subnet (10.0.1.0/26)              │  │
+│  │  ┌────────────────────────────────────────────────┐  │  │
+│  │  │     Azure App Service (Linux)                  │  │  │
+│  │  │  ┌──────────────────────────────────────────┐  │  │  │
+│  │  │  │  Streamlit Container (Python 3.12)       │  │  │  │
+│  │  │  │  - app.py (main UI)                     │  │  │  │
+│  │  │  │  - chat_history_manager.py (storage)    │  │  │  │
+│  │  │  │  - Azure Easy Auth (SSO headers)        │  │  │  │
+│  │  │  └──────────────────────────────────────────┘  │  │  │
+│  │  └────────────────────────────────────────────────┘  │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                           │                                 │
+│                           │ (NAT Gateway)                   │
+│                           ▼                                 │
+│                  ┌─────────────────┐                        │
+│                  │   Static Public  │                        │
+│                  │   IP Address     │                        │
+│                  └─────────────────┘                        │
+└────────────────────────────────────────────────────────────┘
+                            │
+              All outbound traffic uses this IP
+                            │
+          ┌─────────────────┴─────────────────┐
+          ▼                                   ▼
+┌──────────────────────┐          ┌──────────────────┐
+│  PostgreSQL          │          │  Redis Cache     │
+│  Flexible Server     │          │  (Premium)       │
+│                      │          │                  │
+│  - Conversations     │          │  - WRITE-THROUGH │
+│  - Messages          │          │  - 30min TTL     │
+│  - PRIMARY STORE     │          │  - Cache Layer   │
+│  - Firewall:         │          └──────────────────┘
+│    Only NAT Gateway  │
+│    IP whitelisted    │
+└──────────────────────┘
+    (writes go to both simultaneously)
 ```
 
 ### Key Components
 
-- **App Service**: Hosts the containerized Streamlit application
-- **PostgreSQL**: Primary persistent storage for chat conversations and messages
+- **App Service**: Hosts the containerized Streamlit application with VNet integration
+- **Virtual Network**: Isolated network with delegated subnet for App Service integration
+- **NAT Gateway**: Provides static outbound public IP for all App Service traffic
+- **PostgreSQL**: Primary persistent storage for chat conversations and messages (network-isolated with IP whitelisting)
 - **Redis**: Write-through caching layer for improved performance (optional, controlled by `CHAT_HISTORY_MODE` in `.env`)
 - **Container Registry**: Private Docker registry for app images
 - **Key Vault**: Secure storage for secrets (DB passwords, Redis keys)
@@ -349,11 +376,45 @@ The storage backend is configured via the **`CHAT_HISTORY_MODE`** environment va
 
 ### Security Features
 
+- **VNet Integration**: App Service runs in isolated Virtual Network with dedicated subnet
+- **NAT Gateway**: All outbound traffic routed through static public IP for consistent IP whitelisting
+- **Network Isolation**: PostgreSQL firewall only allows connections from NAT Gateway IP (no public access)
 - **Managed Identity**: No credentials in code, secure service-to-service auth
 - **Key Vault**: Centralized secret management
 - **Easy Auth**: Azure AD SSO integration (production)
 - **SSL/TLS**: All connections encrypted (PostgreSQL, Redis, HTTPS)
-- **Private networking**: VNet integration available (configure in Bicep)
+- **Route All Traffic**: `vnetRouteAllEnabled` ensures all App Service outbound traffic uses VNet/NAT Gateway
+
+### Network Architecture
+
+The application uses **VNet Integration** with a **NAT Gateway** to provide network isolation and consistent outbound IP addressing:
+
+**How it works:**
+1. App Service is integrated into a dedicated subnet (`appServiceSubnet`) within a Virtual Network
+2. The subnet is delegated to `Microsoft.Web/serverFarms` for App Service use
+3. A NAT Gateway is attached to the subnet, providing a static public IP
+4. All outbound traffic from the App Service routes through the NAT Gateway
+5. PostgreSQL firewall is configured to **only allow** connections from the NAT Gateway's public IP
+
+**Benefits:**
+- **Consistent IP**: All outbound traffic uses a single, predictable static IP address
+- **Network Security**: PostgreSQL is not publicly accessible - only App Service can connect
+- **Compliance**: Meets security requirements for network isolation and IP whitelisting
+- **Scalability**: NAT Gateway handles multiple App Service instances seamlessly
+
+**Configuration:**
+- VNet CIDR: Configurable via `VNET_ADDRESS_SPACE` in `.env` (default: `10.0.0.0/16`)
+- Subnet CIDR: Configurable via `SUBNET_ADDRESS_PREFIX` in `.env` (default: `10.0.1.0/26` - 64 addresses)
+- NAT Gateway IP: Automatically provisioned and output after deployment
+
+**Viewing NAT Gateway IP:**
+```bash
+# Get the NAT Gateway public IP (used to whitelist in PostgreSQL)
+az deployment group show \
+  -g $AZURE_RESOURCE_GROUP \
+  -n <deployment-name> \
+  --query properties.outputs.natGatewayPublicIP.value -o tsv
+```
 
 ## Troubleshooting
 
@@ -392,17 +453,25 @@ psql -h ${RESOURCE_PREFIX}-postgres.postgres.database.azure.com \
 
 ### Common Issues
 
-**Issue**: Database initialization fails
-- **Solution**: Ensure your IP is whitelisted in PostgreSQL firewall rules
+**Issue**: Database initialization fails with connection timeout
+- **Cause**: PostgreSQL firewall is configured to only allow NAT Gateway IP (network-isolated)
+- **Solution**: Temporarily add your local IP to access database during initialization
   ```bash
-  # Add your IP manually
+  # Add your IP for database initialization
   az postgres flexible-server firewall-rule create \
     -g $AZURE_RESOURCE_GROUP \
     -n ${RESOURCE_PREFIX}-postgres \
-    --rule-name my-ip \
+    --rule-name temp-local-access \
     --start-ip-address $(curl -s https://api.ipify.org) \
     --end-ip-address $(curl -s https://api.ipify.org)
+
+  # Remove after initialization (optional - keeps production secure)
+  az postgres flexible-server firewall-rule delete \
+    -g $AZURE_RESOURCE_GROUP \
+    -n ${RESOURCE_PREFIX}-postgres \
+    --rule-name temp-local-access --yes
   ```
+- **Note**: The `deploy_script.sh db` command automatically adds/removes your IP during initialization
 
 **Issue**: Container deployment fails
 - **Solution**: Check ACR authentication and image availability
