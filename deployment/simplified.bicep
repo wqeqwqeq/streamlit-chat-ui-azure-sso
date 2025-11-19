@@ -41,20 +41,20 @@ resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-01-01-pr
     name: 'Basic'
   }
   properties: {
-    adminUserEnabled: true  // Enable admin credentials for Docker image pulls
+    adminUserEnabled: false  // Use managed identity instead of admin credentials
   }
 }
 
-// NOTE: RBAC role assignment removed - using admin credentials instead of managed identity
-// resource acrPullRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-//   name: guid(containerRegistry.id, userAssignedIdentity.id, 'acrpull')
-//   scope: containerRegistry
-//   properties: {
-//     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')  // AcrPull role
-//     principalId: userAssignedIdentity.properties.principalId
-//     principalType: 'ServicePrincipal'
-//   }
-// }
+// Grant the user-assigned managed identity AcrPull role on the container registry
+resource acrPullRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(containerRegistry.id, userAssignedIdentity.id, 'acrpull')
+  scope: containerRegistry
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')  // AcrPull role
+    principalId: userAssignedIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
 
 // get reference to existing central Log Analytics workspace
 resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2021-06-01' = {
@@ -123,6 +123,9 @@ resource appService 'Microsoft.Web/sites@2022-09-01' = {
       // CHANGE: Use Docker container instead of Python runtime
       linuxFxVersion: 'DOCKER|${containerRegistry.properties.loginServer}/${resourcePrefix}-app:latest'
       alwaysOn: true
+      // Configure ACR authentication using managed identity
+      acrUseManagedIdentityCreds: true  // FIXED: Was false, should be true
+      acrUserManagedIdentityID: userAssignedIdentity.properties.clientId
 
       appSettings: [
         {
@@ -154,18 +157,10 @@ resource appService 'Microsoft.Web/sites@2022-09-01' = {
           name: 'WEBSITE_LOAD_CERTIFICATES'
           value: '*'
         }
-        // ACR configuration - using admin credentials
+        // ACR configuration
         {
           name: 'DOCKER_REGISTRY_SERVER_URL'
           value: 'https://${containerRegistry.properties.loginServer}'
-        }
-        {
-          name: 'DOCKER_REGISTRY_SERVER_USERNAME'
-          value: containerRegistry.listCredentials().username
-        }
-        {
-          name: 'DOCKER_REGISTRY_SERVER_PASSWORD'
-          value: containerRegistry.listCredentials().passwords[0].value
         }
         // Critical: Tell Azure the container listens on port 8000
         {
@@ -176,7 +171,9 @@ resource appService 'Microsoft.Web/sites@2022-09-01' = {
       ipSecurityRestrictionsDefaultAction: 'Allow'
     }
   }
-  // No longer need to wait for RBAC role assignment - using admin credentials
+  dependsOn: [
+    acrPullRoleAssignment  // Ensure RBAC is configured before app starts
+  ]
 }
 
 resource appConfig 'Microsoft.Web/sites/config@2022-09-01' = {
