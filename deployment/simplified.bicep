@@ -19,10 +19,16 @@ param redisSkuName string = 'Basic'
 @description('Redis Cache capacity (0=250MB, 1=1GB, 2=2.5GB)')
 param redisSkuCapacity int = 0
 
+@description('VNet address space (CIDR notation, e.g., 10.0.0.0/16)')
+param vnetAddressSpace string
+
+@description('App Service subnet address prefix (CIDR notation, e.g., 10.0.1.0/26)')
+param subnetAddressPrefix string
+
 // ======================== Internal ========================
 
 var resourcePrefixShort = replace(resourcePrefix, '-', '')
-var keyVaultName = '${resourcePrefixShort}kv'
+var keyVaultName = '${resourcePrefixShort}kv4'
 var postgresServerName = '${resourcePrefix}-postgres'
 
 
@@ -104,6 +110,72 @@ resource serverFarm 'Microsoft.Web/serverfarms@2022-03-01' = {
   }
 }
 
+// ======================== Networking ========================
+
+// Public IP for NAT Gateway (must be Standard SKU with Static allocation)
+resource natPublicIP 'Microsoft.Network/publicIPAddresses@2023-11-01' = {
+  name: '${resourcePrefix}-nat-pip'
+  location: location
+  sku: {
+    name: 'Standard'
+    tier: 'Regional'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+    publicIPAddressVersion: 'IPv4'
+    idleTimeoutInMinutes: 4
+  }
+}
+
+// NAT Gateway for static outbound IP
+resource natGateway 'Microsoft.Network/natGateways@2023-11-01' = {
+  name: '${resourcePrefix}-nat-gateway'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    idleTimeoutInMinutes: 4
+    publicIpAddresses: [
+      {
+        id: natPublicIP.id
+      }
+    ]
+  }
+}
+
+// Virtual Network with App Service integration subnet
+resource virtualNetwork 'Microsoft.Network/virtualNetworks@2023-11-01' = {
+  name: '${resourcePrefix}-vnet'
+  location: location
+  properties: {
+    addressSpace: {
+      addressPrefixes: [
+        vnetAddressSpace
+      ]
+    }
+    subnets: [
+      {
+        name: 'appServiceSubnet'
+        properties: {
+          addressPrefix: subnetAddressPrefix
+          delegations: [
+            {
+              name: 'delegation'
+              properties: {
+                serviceName: 'Microsoft.Web/serverFarms'
+              }
+            }
+          ]
+          natGateway: {
+            id: natGateway.id
+          }
+        }
+      }
+    ]
+  }
+}
+
 resource appService 'Microsoft.Web/sites@2022-09-01' = {
   name: '${resourcePrefix}-app'
   location: location
@@ -117,7 +189,7 @@ resource appService 'Microsoft.Web/sites@2022-09-01' = {
   properties: {
     keyVaultReferenceIdentity: userAssignedIdentity.id
     serverFarmId: serverFarm.id
-
+    virtualNetworkSubnetId: virtualNetwork.properties.subnets[0].id
 
     siteConfig: {
       // CHANGE: Use Docker container instead of Python runtime
@@ -126,6 +198,8 @@ resource appService 'Microsoft.Web/sites@2022-09-01' = {
       // Configure ACR authentication using managed identity
       acrUseManagedIdentityCreds: true  // FIXED: Was false, should be true
       acrUserManagedIdentityID: userAssignedIdentity.properties.clientId
+      // Route all outbound traffic through VNet
+      vnetRouteAllEnabled: true
 
       appSettings: [
         {
@@ -319,13 +393,13 @@ resource postgresDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2
   }
 }
 
-// Firewall rule to allow Azure services
+// Firewall rule to allow traffic from NAT Gateway only
 resource postgresFirewallRule 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2023-03-01-preview' = {
-  name: 'AllowAzureServices'
+  name: 'AllowNATGateway'
   parent: postgresServer
   properties: {
-    startIpAddress: '0.0.0.0'
-    endIpAddress: '255.255.255.255'
+    startIpAddress: natPublicIP.properties.ipAddress
+    endIpAddress: natPublicIP.properties.ipAddress
   }
 }
 
@@ -366,3 +440,6 @@ output redisSslPort int = redisCache.properties.sslPort
 output postgresHostName string = postgresServer.properties.fullyQualifiedDomainName
 output acrLoginServer string = containerRegistry.properties.loginServer
 output acrName string = containerRegistry.name
+output natGatewayPublicIP string = natPublicIP.properties.ipAddress
+output vnetId string = virtualNetwork.id
+output appServiceSubnetId string = virtualNetwork.properties.subnets[0].id

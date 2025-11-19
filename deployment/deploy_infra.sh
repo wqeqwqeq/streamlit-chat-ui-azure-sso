@@ -80,6 +80,8 @@ elif [ "$MODE" = "app" ]; then
         "POSTGRES_SKU"
         "POSTGRES_STORAGE_GB"
         "POSTGRES_DATABASE"
+        "VNET_ADDRESS_SPACE"
+        "SUBNET_ADDRESS_PREFIX"
     )
 
     MISSING_VARS=()
@@ -158,6 +160,8 @@ elif [ "$MODE" = "app" ]; then
         echo "   Resource Prefix: $RESOURCE_PREFIX"
         echo "   App Service SKU: $APP_SERVICE_SKU"
         echo "   PostgreSQL SKU: $POSTGRES_SKU"
+        echo "   VNet Address Space: $VNET_ADDRESS_SPACE"
+        echo "   Subnet Address Prefix: $SUBNET_ADDRESS_PREFIX"
         echo ""
     else
         echo ""
@@ -166,6 +170,8 @@ elif [ "$MODE" = "app" ]; then
         echo "   Resource Prefix: $RESOURCE_PREFIX"
         echo "   App Service SKU: $APP_SERVICE_SKU"
         echo "   PostgreSQL SKU: $POSTGRES_SKU"
+        echo "   VNet Address Space: $VNET_ADDRESS_SPACE"
+        echo "   Subnet Address Prefix: $SUBNET_ADDRESS_PREFIX"
         echo ""
     fi
 
@@ -193,7 +199,9 @@ elif [ "$MODE" = "app" ]; then
             postgresAdminPassword="$POSTGRES_ADMIN_PASSWORD" \
             postgresSku="$POSTGRES_SKU" \
             postgresStorageSizeGB="$POSTGRES_STORAGE_GB" \
-            postgresDatabaseName="$POSTGRES_DATABASE"
+            postgresDatabaseName="$POSTGRES_DATABASE" \
+            vnetAddressSpace="$VNET_ADDRESS_SPACE" \
+            subnetAddressPrefix="$SUBNET_ADDRESS_PREFIX"
 
         echo ""
         echo "✅ What-if analysis complete!"
@@ -215,7 +223,9 @@ elif [ "$MODE" = "app" ]; then
             postgresAdminPassword="$POSTGRES_ADMIN_PASSWORD" \
             postgresSku="$POSTGRES_SKU" \
             postgresStorageSizeGB="$POSTGRES_STORAGE_GB" \
-            postgresDatabaseName="$POSTGRES_DATABASE"
+            postgresDatabaseName="$POSTGRES_DATABASE" \
+            vnetAddressSpace="$VNET_ADDRESS_SPACE" \
+            subnetAddressPrefix="$SUBNET_ADDRESS_PREFIX"
 
         echo ""
         echo "✅ Infrastructure deployed successfully!"
@@ -229,6 +239,9 @@ elif [ "$MODE" = "app" ]; then
         echo "   - Key Vault: $(echo ${RESOURCE_PREFIX} | tr -d '-')kv"
         echo "   - Application Insights: ${RESOURCE_PREFIX}-insights"
         echo "   - Managed Identity: ${RESOURCE_PREFIX}-uai"
+        echo "   - Virtual Network: ${RESOURCE_PREFIX}-vnet"
+        echo "   - NAT Gateway: ${RESOURCE_PREFIX}-nat-gateway"
+        echo "   - Public IP: ${RESOURCE_PREFIX}-nat-pip"
         echo ""
         echo "📋 Next steps:"
         echo "   1. Get Redis credentials from Azure Portal or outputs"
